@@ -1,12 +1,50 @@
+# Maven and other build output
 /target/
+/build/
+/dist/
+/out/
+/coverage/
+/test-results/
+*.class
+*.nbm
+
+# Local IDE settings (keep shared project configuration)
 /.idea/
 /.vscode/
 /nbproject/private/
-*.class
+.classpath
+.project
+.settings/
+.factorypath
+*.iml
+*.iws
+*.ipr
+
+# Logs, crash dumps, and temporary/editor backup files
 *.log
 *.hprof
-.DS_Store
-Thumbs.db
+hs_err_pid*
+replay_pid*
+*.tmp
+*.temp
+*.bak
+*.orig
+*~
+
+# Credentials and local signing keys
 .env
 .env.*
 !.env.example
+!.env.sample
+!.env.template
+*.jks
+*.keystore
+*.p12
+*.pfx
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Do not ignore *.zip: the bundled Codex runtime is tracked through Git LFS.
