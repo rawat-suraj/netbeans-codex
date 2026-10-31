@@ -89,6 +89,7 @@ public final class HistoryChecks {
                 CodexChatPanel panel = (CodexChatPanel) panelField.get(component);
                 panel.promptArea.setText("Keep my unsent draft");
                 panel.attachmentModel.addElement("old-project-file");
+                panel.mode.setSelectedItem(AccessMode.EDIT_WORKSPACE);
                 var restore = CodexTopComponent.class.getDeclaredMethod("restoreConversation", CodexHistory.Conversation.class);
                 restore.setAccessible(true);
                 restore.invoke(component, conversation);
@@ -96,6 +97,7 @@ public final class HistoryChecks {
                         && panel.conversationArea.getText().contains("Final answer"), "Render saved transcript in the plugin");
                 check(panel.promptArea.getText().equals("Keep my unsent draft"), "Preserve unsent text when switching chats");
                 check(panel.attachmentModel.isEmpty(), "Do not leak attachments from the previous project");
+                check(panel.accessMode() == AccessMode.READ_ONLY, "Restored chats must require explicit editing-mode selection");
                 check(panel.isReady() && panel.historyBtn.isEnabled(), "Enable continuation after hydration");
                 panel.setConnectionState(CodexChatPanel.ConnectionState.BUSY);
                 check(!panel.historyBtn.isEnabled(), "Prevent switching during a live turn");

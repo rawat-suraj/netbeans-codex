@@ -17,6 +17,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Editor-context or progress checks failed.' }
     & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.HistoryChecks
     if ($LASTEXITCODE -ne 0) { throw 'Chat history checks failed.' }
+    & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.TranscriptLayoutChecks
+    if ($LASTEXITCODE -ne 0) { throw 'Transcript layout checks failed.' }
+    & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.MultiRepositoryChecks
+    if ($LASTEXITCODE -ne 0) { throw 'Multi-repository checks failed.' }
+    & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.AccessModeChecks
+    if ($LASTEXITCODE -ne 0) { throw 'Access mode checks failed.' }
+    & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.ImagePasteChecks
+    if ($LASTEXITCODE -ne 0) { throw 'Image paste checks failed.' }
 } finally {
     Pop-Location
 }

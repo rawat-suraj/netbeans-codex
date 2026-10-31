@@ -9,15 +9,24 @@ Review and discuss your code without switching away from your project.
 
 - **ChatGPT sign-in:** sign in through your browser; a queued message sends once authentication finishes.
 - **Project-aware chat:** use the detected NetBeans project or select a project folder.
+- **Multiple repositories per chat:** include backend and frontend project folders in one conversation.
 - **Active editor context:** include the current file, cursor line, and unsaved editor contents automatically.
 - **File attachments:** attach saved source files through the composer or the **Add to Codex** context action.
+- **Image paste:** paste screenshots into the composer with **Ctrl+V**, or attach PNG/JPEG/GIF/BMP files.
 - **Streaming replies:** see responses as they arrive, with commentary and final messages separated.
 - **Visible activity:** animated status and elapsed time appear below the latest reply while Codex is working.
 - **Shared local history:** browse, search, and resume saved Codex conversations from compatible local clients.
 - **IDE integration:** a dockable panel, light/dark styling, and text wrapping for narrow sidebars.
 
-This version runs in **read-only chat mode**. It can inspect project files but
-does not modify them.
+The composer has an access-mode dropdown. **Chat · Read only** inspects code;
+**Agent · Edit workspace** can modify files and run sandboxed commands in the
+chat's workspace folders. Choose editing mode explicitly after connecting.
+New or restored conversations default to read-only. The selected mode applies
+to the next turn, including follow-ups in an existing chat.
+
+Editing mode keeps network access restricted and does not support permission
+escalation dialogs. Commands that require downloads or access outside the
+workspace may still be blocked.
 
 ## Requirements
 
@@ -77,12 +86,27 @@ it does not install the plugin into your regular IDE.
 
 ### Editor and project context
 
-The current chat mode can read project files; it does not modify them.
+Read-only mode can inspect project files. Select **Agent · Edit workspace** to
+allow changes in the included workspace folders.
 The most recently focused source editor is included automatically, with its path,
 cursor line, and a snapshot of the current buffer (including unsaved changes).
 The active file is shown above the composer. Buffers larger than 64 KB are
-identified by path instead of being embedded. Start a new chat when switching
-to a different project.
+identified by path instead of being embedded.
+
+Use **Folders…** above the composer to include multiple project folders in the
+same conversation, such as separate backend and frontend repositories. The first
+folder remains the working directory. You can add or remove additional folders
+without creating a new chat. When a NetBeans project is nested inside a Git
+repository, the repository root is used.
+
+Sending a request with an active editor or explicitly selected attachment from
+another project automatically includes that project's root. For files without a
+NetBeans project or Git repository, their containing folder is included. Only
+selected project folders are listed; other sibling repositories are not added.
+The composer shows the included folder names, and their full paths are available
+in its tooltip. Extra folders are saved locally per chat and restored when
+resuming history through this plugin. The access-mode selector controls whether
+Codex may also edit these folders.
 
 Activity appears directly below the latest response with animated dots and an
 elapsed-time counter. It stays visible throughout each turn, including the periods between an
@@ -94,10 +118,24 @@ server reports that the turn has finished.
 Use **Add to Codex** from a supported file's context menu, or the composer's
 attachment button, to include saved UTF-8 source files.
 
-- Explicit attachments must be saved, valid UTF-8 text files inside the chat's project.
+- Explicit attachments must be saved, valid UTF-8 text files inside one of the chat's workspace folders.
 - Each explicit attachment is limited to **64 KB**, with a combined limit of **256 KB**.
 - Select an attachment and click **×** to remove it.
 - The context action is registered for Java, PHP, and plain-text files.
+
+### Pasting images
+
+Copy a screenshot/image, focus the message composer, and press **Ctrl+V**.
+You can also paste a single copied image file or select an image with the
+attachment button. Each thumbnail has its own **×** button at the top-right;
+click it to remove that image. Normal text copy/paste continues to work.
+
+Images are sent as native visual input rather than embedded source text. You
+can send an image without typing a prompt. The limit is four images, 8 MB per
+encoded image, 16 MB total, and 25 megapixels per image. Images do not add their
+containing directories to the chat's workspace. After a request is accepted,
+sent images leave the draft attachment list; they remain part of the conversation.
+Image input requires a model that supports images.
 
 ### Chat history and resuming across local Codex clients
 
@@ -115,8 +153,9 @@ CLI, VS Code, and plugin sessions. The project folder must still exist locally.
 Finish a turn before switching clients, then refresh/reopen the chat to load the
 latest saved messages. History is not a live subscription to another client's run.
 
-Resuming keeps the plugin in **read-only** mode, even if the conversation used
-broader permissions elsewhere. User and assistant messages are displayed;
+Resuming resets the plugin to **read-only** mode, even if the conversation used
+broader permissions elsewhere. Select editing mode before the next message if
+you want to modify files. User and assistant messages are displayed;
 private reasoning and raw tool payloads are omitted. Existing unsent draft text
 is preserved, and attachments from the previous chat are cleared.
 
@@ -153,15 +192,15 @@ checks are not automatically executed by `mvn test` alone.
 | Runtime archive is missing or invalid | Run `git lfs install` and `git lfs pull`, then rebuild. |
 | Send starts sign-in | Finish the browser authorization; the queued message sends automatically. |
 | Codex asks which file to review | Focus the intended editor and verify the **Active file** label before sending. |
-| Active file is outside the chat project | Start a new chat for that project. |
+| Need backend and frontend context in one chat | Add both roots with **Folders…**, or focus a file in the other project before sending. |
 | The old interface is still visible after updating | Fully close and reopen NetBeans, then check the version in the Codex header. |
 
 ## Current limitations
 
 - The bundled runtime supports Windows x64 only.
 - This package uses NetBeans APIs and cannot be installed in Android Studio or IntelliJ IDEA.
-- File editing, approval dialogs, a skill picker, and history deletion/archiving are not implemented.
-- Skills that require unavailable tools or write access cannot complete in the current chat mode.
+- Approval dialogs, a skill picker, and history deletion/archiving are not implemented.
+- Skills requiring unavailable tools or permissions beyond the selected access mode cannot complete.
 
 ## License and third-party components
 

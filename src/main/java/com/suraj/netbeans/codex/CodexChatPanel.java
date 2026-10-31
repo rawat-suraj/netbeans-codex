@@ -16,7 +16,7 @@ public final class CodexChatPanel extends JPanel {
     final DefaultListModel<String> attachmentModel;
     enum ConnectionState { SIGNED_OUT, CONNECTING, AWAITING_LOGIN, READY, BUSY }
     private ConnectionState connectionState = ConnectionState.SIGNED_OUT;
-    private final JLabel mode = new JLabel("Chat · Read only");
+    final JComboBox<AccessMode> mode = new JComboBox<>(AccessMode.values());
     final Transcript conversationArea = new Transcript();
     final JTextArea promptArea = new JTextArea(3, 1) {
         @Override protected void paintComponent(Graphics graphics) {
@@ -31,9 +31,13 @@ public final class CodexChatPanel extends JPanel {
     final JButton sendBtn = iconButton("send", "Send message (Enter)");
     final JButton checkRuntimeButton = new JButton("Sign in with ChatGPT");
     final JButton removeAttachmentBtn = iconButton("remove", "Remove selected attachments");
-    final JButton attachBtn = iconButton("add", "Attach source files");
+    final JButton attachBtn = iconButton("add", "Attach source files or images");
     final JButton newChatBtn = iconButton("new", "New chat");
     final JButton historyBtn = iconButton("history", "Chat history — resume a local Codex chat");
+    final JButton foldersBtn = new JButton("Folders…");
+    private final java.util.Map<String, ImageAttachment> images = new java.util.LinkedHashMap<>();
+    private int imageNumber;
+    private final JPanel imageTray = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
     final JList<String> attachmentsList;
     private final Color background = color("Panel.background", new Color(0x1f1f1f));
     private final boolean dark = background.getRed() + background.getGreen() + background.getBlue() < 384;
@@ -55,6 +59,7 @@ public final class CodexChatPanel extends JPanel {
         activity.setText(activityText + ".".repeat(activityTick + 1) + "  ·  " + seconds + "s");
     });
     private final JPanel cards = new JPanel(new CardLayout());
+    private boolean conversationCardUpdatePending;
 
     /** JavaBean constructor used by the NetBeans form designer. */
     public CodexChatPanel() {
@@ -111,9 +116,7 @@ public final class CodexChatPanel extends JPanel {
         activityRow.setVisible(false);
         cards.add(scroll(new ConversationStack()), "conversation");
         add(cards, BorderLayout.CENTER);
-        conversationArea.getDocument().addDocumentListener(onChange(() ->
-                ((CardLayout) cards.getLayout()).show(cards,
-                        conversationArea.getDocument().getLength() == 0 ? "welcome" : "conversation")));
+        conversationArea.getDocument().addDocumentListener(onChange(this::scheduleConversationCardUpdate));
 
         JPanel bottom = panel(new BorderLayout(0, 9));
         bottom.setBorder(BorderFactory.createEmptyBorder(8, 12, 10, 12));
@@ -121,7 +124,13 @@ public final class CodexChatPanel extends JPanel {
         project.setForeground(muted);
         project.setBorder(BorderFactory.createEmptyBorder(0, 3, 0, 0));
         JPanel context = panel(new BorderLayout(0, 5));
-        context.add(project, BorderLayout.NORTH);
+        JPanel folderRow = panel(new BorderLayout(6, 0));
+        folderRow.add(project, BorderLayout.CENTER);
+        styleButton(foldersBtn);
+        foldersBtn.setFont(font.deriveFont(11f));
+        foldersBtn.setToolTipText("Add backend/frontend project folders to this chat");
+        folderRow.add(foldersBtn, BorderLayout.EAST);
+        context.add(folderRow, BorderLayout.NORTH);
         activeFile.setFont(font.deriveFont(11f));
         activeFile.setForeground(muted);
         activeFile.setBorder(BorderFactory.createEmptyBorder(0, 3, 0, 0));
@@ -149,8 +158,15 @@ public final class CodexChatPanel extends JPanel {
             @Override public void actionPerformed(ActionEvent event) { sendBtn.doClick(); }
         });
         promptArea.getInputMap().put(KeyStroke.getKeyStroke("shift ENTER"), DefaultEditorKit.insertBreakAction);
+        promptArea.setTransferHandler(new ImagePasteHandler(promptArea.getTransferHandler(),
+                () -> connectionState != ConnectionState.BUSY, this::addImage,
+                message -> status.setText(message)));
 
-        attachmentsList = new JList<>(attachments);
+        DefaultListModel<String> sourceAttachments = new DefaultListModel<>();
+        for (int i = 0; i < attachments.size(); i++) {
+            if (!images.containsKey(attachments.get(i))) sourceAttachments.addElement(attachments.get(i));
+        }
+        attachmentsList = new JList<>(sourceAttachments);
         attachmentsList.setBackground(surface);
         attachmentsList.setForeground(foreground);
         attachmentsList.setVisibleRowCount(2);
@@ -162,22 +178,47 @@ public final class CodexChatPanel extends JPanel {
                     int index, boolean selected, boolean focused) {
                 JLabel cell = (JLabel) super.getListCellRendererComponent(list, value, index, selected, focused);
                 cell.setText(Path.of(value.toString()).getFileName().toString());
+                cell.setIcon(null);
                 cell.setToolTipText(value.toString());
                 cell.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
                 return cell;
             }
         });
         attachmentsList.getAccessibleContext().setAccessibleName("Attached source files");
-        JPanel attachmentRow = new JPanel(new BorderLayout(6, 0));
+        JPanel attachmentRow = new JPanel(new BorderLayout(0, 6));
         attachmentRow.setOpaque(false);
+        JPanel sourceRow = new JPanel(new BorderLayout(6, 0));
+        sourceRow.setOpaque(false);
         JScrollPane attachmentScroll = scroll(attachmentsList);
         attachmentScroll.setPreferredSize(new Dimension(0, 50));
-        attachmentRow.add(attachmentScroll, BorderLayout.CENTER);
-        attachmentRow.add(removeAttachmentBtn, BorderLayout.EAST);
+        sourceRow.add(attachmentScroll, BorderLayout.CENTER);
+        sourceRow.add(removeAttachmentBtn, BorderLayout.EAST);
+        sourceRow.setVisible(!sourceAttachments.isEmpty());
+        attachmentRow.add(sourceRow, BorderLayout.SOUTH);
+        imageTray.setBackground(surface);
+        JScrollPane imageScroll = scroll(imageTray);
+        imageScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        imageScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+        imageScroll.setPreferredSize(new Dimension(0, 104));
+        imageScroll.setVisible(false);
+        attachmentRow.add(imageScroll, BorderLayout.CENTER);
         attachmentRow.setVisible(!attachments.isEmpty());
         composer.add(attachmentRow, BorderLayout.NORTH);
         attachments.addListDataListener(new ListDataListener() {
-            private void changed() { attachmentRow.setVisible(!attachments.isEmpty()); revalidate(); repaint(); }
+            private void changed() {
+                images.keySet().removeIf(name -> !attachments.contains(name));
+                sourceAttachments.clear();
+                for (int i = 0; i < attachments.size(); i++) {
+                    String name = attachments.get(i);
+                    if (!images.containsKey(name)) sourceAttachments.addElement(name);
+                }
+                rebuildImageTray();
+                sourceRow.setVisible(!sourceAttachments.isEmpty());
+                imageScroll.setVisible(!images.isEmpty());
+                attachmentRow.setVisible(!attachments.isEmpty());
+                updateStatus();
+                revalidate(); repaint();
+            }
             @Override public void intervalAdded(ListDataEvent e) { changed(); }
             @Override public void intervalRemoved(ListDataEvent e) { changed(); }
             @Override public void contentsChanged(ListDataEvent e) { changed(); }
@@ -192,7 +233,9 @@ public final class CodexChatPanel extends JPanel {
         leftTools.add(attachBtn);
         mode.setFont(font.deriveFont(11f));
         mode.setForeground(muted);
-        mode.setToolTipText("Codex can read your project. File changes are disabled.");
+        mode.setToolTipText(AccessMode.READ_ONLY.tooltip);
+        mode.getAccessibleContext().setAccessibleName("Codex access mode");
+        mode.addActionListener(event -> mode.setToolTipText(accessMode().tooltip));
         leftTools.add(mode);
         leftTools.add(checkRuntimeButton);
         tools.add(leftTools, BorderLayout.WEST);
@@ -215,11 +258,32 @@ public final class CodexChatPanel extends JPanel {
         updateStatus();
     }
 
+    private void scheduleConversationCardUpdate() {
+        if (conversationCardUpdatePending) return;
+        conversationCardUpdatePending = true;
+        // CardLayout.show can validate synchronously. Document listeners run
+        // before Swing has updated every text View, so laying out here would
+        // read stale glyph offsets. Coalesce edits and switch after notification.
+        SwingUtilities.invokeLater(() -> {
+            conversationCardUpdatePending = false;
+            ((CardLayout) cards.getLayout()).show(cards,
+                    conversationArea.getDocument().getLength() == 0 ? "welcome" : "conversation");
+        });
+    }
+
     void setProjectDirectory(String directory) {
         Path path = directory == null ? null : Path.of(directory);
         project.setText(path == null ? "Current project"
                 : path.getFileName() == null ? path.toString() : path.getFileName().toString());
         project.setToolTipText(directory == null ? "Project is detected when you send a message" : directory);
+    }
+
+    void setWorkspaceFolders(java.util.List<Path> folders) {
+        if (folders.isEmpty()) { setProjectDirectory(null); return; }
+        String names = folders.stream().map(path -> path.getFileName() == null ? path.toString() : path.getFileName().toString())
+                .collect(java.util.stream.Collectors.joining(" + "));
+        project.setText(names);
+        project.setToolTipText(folders.stream().map(Path::toString).collect(java.util.stream.Collectors.joining("; ")));
     }
 
     void setConnectionState(ConnectionState state) {
@@ -266,6 +330,45 @@ public final class CodexChatPanel extends JPanel {
 
     boolean isReady() { return connectionState == ConnectionState.READY; }
     boolean canSignIn() { return connectionState == ConnectionState.SIGNED_OUT; }
+    ImageAttachment imageAttachment(String name) { return images.get(name); }
+    boolean hasImages() { return !images.isEmpty(); }
+    private void rebuildImageTray() {
+        imageTray.removeAll();
+        images.forEach((name, image) -> {
+            JPanel card = new RoundedPanel(surface, null, new RoundedBorder(line, 8));
+            card.setPreferredSize(new Dimension(84, 84));
+            JLabel preview = new JLabel(image.thumbnail());
+            preview.setHorizontalAlignment(SwingConstants.CENTER);
+            preview.setBounds(8, 8, 64, 64);
+            preview.setToolTipText(name + " · " + image.width() + " × " + image.height());
+            card.add(preview);
+            JButton remove = iconButton("remove", "Remove " + name);
+            remove.setBounds(62, 0, 22, 22);
+            remove.setBackground(surface);
+            remove.setForeground(foreground);
+            remove.setOpaque(true);
+            remove.setContentAreaFilled(true);
+            remove.setBorder(BorderFactory.createLineBorder(line));
+            remove.setEnabled(connectionState != ConnectionState.BUSY);
+            remove.addActionListener(event -> attachmentModel.removeElement(name));
+            card.add(remove);
+            card.setComponentZOrder(remove, 0);
+            imageTray.add(card);
+        });
+        imageTray.revalidate();
+        imageTray.repaint();
+    }
+    void addImage(ImageAttachment image) {
+        if (images.size() >= 4) throw new IllegalArgumentException("Attach at most 4 images per message.");
+        int bytes = image.bytes() + images.values().stream().mapToInt(ImageAttachment::bytes).sum();
+        if (bytes > 16 * 1024 * 1024) throw new IllegalArgumentException("Attached images exceed 16 MB in total.");
+        String name = "Image " + (++imageNumber) + ".png";
+        images.put(name, image);
+        attachmentModel.addElement(name);
+        status.setText("Image attached");
+    }
+    AccessMode accessMode() { return (AccessMode) mode.getSelectedItem(); }
+    void resetAccessMode() { mode.setSelectedItem(AccessMode.READ_ONLY); }
 
     private void updateStatus() {
         boolean signedOut = canSignIn();
@@ -286,7 +389,8 @@ public final class CodexChatPanel extends JPanel {
         checkRuntimeButton.setVisible(!signedIn);
         checkRuntimeButton.setEnabled(signedOut);
         mode.setVisible(signedIn);
-        sendBtn.setEnabled((signedOut || isReady()) && !promptArea.getText().isBlank());
+        mode.setEnabled(isReady());
+        sendBtn.setEnabled((signedOut || isReady()) && (!promptArea.getText().isBlank() || hasImages()));
         String sendDescription = signedOut ? "Sign in with ChatGPT and send this message"
                 : working ? "Wait for the current reply"
                 : signedIn ? "Send message (Enter)" : "Complete sign-in to send";
@@ -294,7 +398,13 @@ public final class CodexChatPanel extends JPanel {
         sendBtn.getAccessibleContext().setAccessibleName(sendDescription);
         newChatBtn.setEnabled(signedOut || isReady());
         historyBtn.setEnabled(signedOut || isReady());
+        foldersBtn.setEnabled(signedOut || isReady());
         attachBtn.setEnabled(!working);
+        for (Component card : imageTray.getComponents()) {
+            for (Component child : ((JPanel) card).getComponents()) {
+                if (child instanceof JButton button) button.setEnabled(!working);
+            }
+        }
     }
 
     private JPanel welcome() {

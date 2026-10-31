@@ -3,6 +3,7 @@ package com.suraj.netbeans.codex;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
@@ -29,12 +30,14 @@ record EditorContext(Path path, String content, int line) {
     }
 
     String appendTo(String prompt, String directory) throws IOException {
-        Path root = Path.of(directory).toRealPath();
+        return appendTo(prompt, List.of(Path.of(directory)));
+    }
+
+    String appendTo(String prompt, List<Path> folders) throws IOException {
+        Path root = WorkspaceFolders.containing(path, folders);
         Path file = path.toRealPath();
-        if (!file.startsWith(root)) {
-            throw new IOException("The active file is outside this chat's project. Start a new chat for " + path);
-        }
         String context = "\n\nIDE editor context:\nActive file: " + file
+                + "\nRepository/project folder: " + root
                 + "\nProject-relative path: " + root.relativize(file)
                 + "\nCursor line: " + line
                 + "\nWhen the user says 'this file', they mean this active editor file. "

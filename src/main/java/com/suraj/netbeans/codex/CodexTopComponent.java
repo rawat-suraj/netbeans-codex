@@ -70,6 +70,7 @@ public final class CodexTopComponent extends TopComponent {
     private volatile int connectionGeneration;
     private volatile String threadId;
     private String projectDirectory;
+    private final List<Path> workspaceFolders = new ArrayList<>();
     private boolean turnInProgress;
     private boolean sendAfterSignIn;
     private boolean historyAfterSignIn;
@@ -96,7 +97,6 @@ public final class CodexTopComponent extends TopComponent {
         setName(NbBundle.getMessage(CodexTopComponent.class, "CTL_CodexTopComponent"));
         setToolTipText(NbBundle.getMessage(CodexTopComponent.class, "HINT_CodexTopComponent"));
         chatPanel.setConnectionState(CodexChatPanel.ConnectionState.SIGNED_OUT);
-        attachmentsList.setModel(attachmentModel);
     }
 
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
@@ -122,15 +122,18 @@ public final class CodexTopComponent extends TopComponent {
         removeAttachmentBtn.addActionListener(this::removeAttachmentBtnActionPerformed);
         chatPanel.attachBtn.addActionListener(event -> chooseAttachments());
         chatPanel.historyBtn.addActionListener(event -> openHistory());
+        chatPanel.foldersBtn.addActionListener(event -> manageWorkspaceFolders());
         chatPanel.newChatBtn.addActionListener(event -> {
             if (turnInProgress) {
                 return;
             }
             threadId = null;
+            chatPanel.resetAccessMode();
             historyAfterSignIn = false;
             sendAfterSignIn = false;
             queuedEditorContext = null;
             projectDirectory = null;
+            workspaceFolders.clear();
             conversationArea.setText("");
             promptArea.setText("");
             attachmentModel.clear();
@@ -158,8 +161,11 @@ public final class CodexTopComponent extends TopComponent {
     }
 
     private void restoreConversation(CodexHistory.Conversation conversation) {
+        chatPanel.resetAccessMode();
         threadId = conversation.id();
         projectDirectory = conversation.cwd();
+        workspaceFolders.clear();
+        workspaceFolders.addAll(WorkspaceFolders.load(threadId, projectDirectory));
         sendAfterSignIn = false;
         queuedEditorContext = null;
         attachmentModel.clear();
@@ -172,10 +178,66 @@ public final class CodexTopComponent extends TopComponent {
             conversationArea.appendHistoryMessage(message.user(), message.text());
         }
         if (conversation.messages().isEmpty()) conversationArea.append("Chat resumed. Send a message to continue.\n");
-        chatPanel.setProjectDirectory(projectDirectory);
+        chatPanel.setWorkspaceFolders(workspaceFolders);
         chatPanel.setConnectionState(CodexChatPanel.ConnectionState.READY);
         conversationArea.setCaretPosition(conversationArea.getDocument().getLength());
         promptArea.requestFocusInWindow();
+    }
+
+    private void manageWorkspaceFolders() {
+        if (turnInProgress) return;
+        DefaultListModel<Path> model = new DefaultListModel<>();
+        workspaceFolders.forEach(model::addElement);
+        javax.swing.JList<Path> list = new javax.swing.JList<>(model);
+        javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(list);
+        scroll.setPreferredSize(new java.awt.Dimension(520, 180));
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(6, 8));
+        panel.add(new javax.swing.JLabel("Folders shared by this chat (first folder is the working directory)"), java.awt.BorderLayout.NORTH);
+        panel.add(scroll, java.awt.BorderLayout.CENTER);
+        javax.swing.JPanel buttons = new javax.swing.JPanel();
+        javax.swing.JButton add = new javax.swing.JButton("Add folders…");
+        javax.swing.JButton remove = new javax.swing.JButton("Remove selected");
+        buttons.add(add);
+        buttons.add(remove);
+        panel.add(buttons, java.awt.BorderLayout.SOUTH);
+        add.addActionListener(event -> {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.setMultiSelectionEnabled(true);
+            if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            for (File folder : chooser.getSelectedFiles()) {
+                try {
+                    Path real = WorkspaceFolders.repositoryRoot(folder.toPath());
+                    if (!model.contains(real)) model.addElement(real);
+                } catch (IOException error) {
+                    javax.swing.JOptionPane.showMessageDialog(this, error.getMessage());
+                }
+            }
+        });
+        remove.addActionListener(event -> {
+            int[] selected = list.getSelectedIndices();
+            for (int i = selected.length - 1; i >= 0; i--) {
+                if (selected[i] != 0 || projectDirectory == null) model.remove(selected[i]);
+            }
+        });
+        if (javax.swing.JOptionPane.showConfirmDialog(this, panel, "Chat workspace folders",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE) != javax.swing.JOptionPane.OK_OPTION) return;
+        workspaceFolders.clear();
+        for (int i = 0; i < model.size(); i++) workspaceFolders.add(model.get(i));
+        if (projectDirectory == null && !workspaceFolders.isEmpty()) projectDirectory = workspaceFolders.get(0).toString();
+        WorkspaceFolders.save(threadId, workspaceFolders);
+        chatPanel.setWorkspaceFolders(workspaceFolders);
+    }
+
+    private void includeFileProject(Path file) throws IOException {
+        try { WorkspaceFolders.containing(file, workspaceFolders); return; }
+        catch (IOException outsideWorkspace) { /* Explicitly selected editor/attachment adds its project. */ }
+        Path real = file.toRealPath();
+        FileObject object = FileUtil.toFileObject(FileUtil.normalizeFile(real.toFile()));
+        Project owner = object == null ? null : FileOwnerQuery.getOwner(object);
+        File projectFolder = owner == null ? null : FileUtil.toFile(owner.getProjectDirectory());
+        Path folder = projectFolder == null ? real.getParent() : projectFolder.toPath();
+        WorkspaceFolders.add(workspaceFolders, WorkspaceFolders.repositoryRoot(folder));
     }
 
     private void chooseAttachments() {
@@ -183,7 +245,7 @@ public final class CodexTopComponent extends TopComponent {
             return;
         }
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Attach source files");
+        chooser.setDialogTitle("Attach source files or images");
         chooser.setMultiSelectionEnabled(true);
         if (projectDirectory != null) {
             chooser.setCurrentDirectory(new File(projectDirectory));
@@ -206,7 +268,8 @@ public final class CodexTopComponent extends TopComponent {
         addAttachments(selected);
     }
     private void sendBtnActionPerformed(java.awt.event.ActionEvent evt) {
-        final String prompt = promptArea.getText().trim();
+        final String prompt = promptArea.getText().isBlank() && chatPanel.hasImages()
+                ? "Please review the attached image(s)." : promptArea.getText().trim();
 
         if (prompt.isEmpty() || turnInProgress) {
             return;
@@ -248,17 +311,33 @@ public final class CodexTopComponent extends TopComponent {
                     .toPath().toAbsolutePath().normalize().toString();
         }
 
-        chatPanel.setProjectDirectory(projectDirectory);
-
         final CodexClient client = codexClient;
         final int generation = connectionGeneration;
         final String directory = projectDirectory;
 
         final List<String> attachedPaths = new ArrayList<>();
+        final List<ImageAttachment> attachedImages = new ArrayList<>();
+        final List<String> attachedImageNames = new ArrayList<>();
 
         for (int i = 0; i < attachmentModel.size(); i++) {
-            attachedPaths.add(attachmentModel.getElementAt(i));
+            String name = attachmentModel.getElementAt(i);
+            ImageAttachment image = chatPanel.imageAttachment(name);
+            if (image == null) attachedPaths.add(name);
+            else { attachedImages.add(image); attachedImageNames.add(name); }
         }
+
+        try {
+            WorkspaceFolders.add(workspaceFolders, Path.of(directory));
+            if (editorContext != null) includeFileProject(editorContext.path());
+            for (String attachment : attachedPaths) includeFileProject(Path.of(attachment));
+        } catch (IOException error) {
+            conversationArea.append("Cannot include project folder: " + error.getMessage() + "\n");
+            return;
+        }
+        final List<Path> folders = List.copyOf(workspaceFolders);
+        final AccessMode accessMode = chatPanel.accessMode();
+        WorkspaceFolders.save(threadId, folders);
+        chatPanel.setWorkspaceFolders(folders);
 
         turnInProgress = true;
         streamedMessages.clear();
@@ -268,22 +347,24 @@ public final class CodexTopComponent extends TopComponent {
         chatPanel.setConnectionState(CodexChatPanel.ConnectionState.BUSY);
         promptArea.setText("");
 
-        conversationArea.append("You: " + prompt + "\n\nCodex: ");
+        conversationArea.append("You: " + prompt
+                + (attachedImages.isEmpty() ? "" : "\n[" + attachedImages.size() + " image(s) attached]") + "\n\nCodex: ");
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
                 String completePrompt = buildPromptWithAttachments(
-                        prompt, attachedPaths, directory);
+                        prompt, attachedPaths, folders);
+                completePrompt = WorkspaceFolders.appendContext(completePrompt, folders);
                 if (editorContext != null) {
-                    completePrompt = editorContext.appendTo(completePrompt, directory);
+                    completePrompt = editorContext.appendTo(completePrompt, folders);
                 }
 
                 if (threadId == null) {
                     JsonObject threadParams = new JsonObject();
                     threadParams.addProperty("cwd", directory);
                     threadParams.addProperty("approvalPolicy", "never");
-                    threadParams.addProperty("sandbox", "read-only");
+                    threadParams.addProperty("sandbox", accessMode.threadSandbox);
 
                     JsonObject response
                             = client.request("thread/start", threadParams).get();
@@ -294,6 +375,7 @@ public final class CodexTopComponent extends TopComponent {
 
                     threadId = response.getAsJsonObject("thread")
                             .get("id").getAsString();
+                    WorkspaceFolders.save(threadId, folders);
                 }
 
                 JsonObject textInput = new JsonObject();
@@ -302,9 +384,9 @@ public final class CodexTopComponent extends TopComponent {
 
                 JsonArray input = new JsonArray();
                 input.add(textInput);
+                for (ImageAttachment image : attachedImages) input.add(image.input());
 
-                JsonObject sandboxPolicy = new JsonObject();
-                sandboxPolicy.addProperty("type", "readOnly");
+                JsonObject sandboxPolicy = accessMode.sandboxPolicy(folders);
 
                 JsonObject turnParams = new JsonObject();
                 turnParams.addProperty("threadId", threadId);
@@ -324,6 +406,7 @@ public final class CodexTopComponent extends TopComponent {
 
                 try {
                     get();
+                    for (String name : attachedImageNames) attachmentModel.removeElement(name);
                     // Streaming continues through the notification callback.
                     // Send is enabled when turn/completed arrives.
                 } catch (Exception e) {
@@ -524,6 +607,8 @@ public final class CodexTopComponent extends TopComponent {
         historyAfterSignIn = false;
         threadId = null;
         projectDirectory = null;
+        workspaceFolders.clear();
+        chatPanel.resetAccessMode();
         chatPanel.setProjectDirectory(null);
         turnInProgress = false;
         chatPanel.setConnectionState(CodexChatPanel.ConnectionState.SIGNED_OUT);
@@ -574,6 +659,7 @@ public final class CodexTopComponent extends TopComponent {
             if ("item/started".equals(method)) {
                 String activity = switch (type) {
                     case "commandExecution" -> "Running a command";
+                    case "fileChange" -> "Editing files";
                     case "mcpToolCall", "dynamicToolCall" -> "Using a tool";
                     case "webSearch" -> "Searching";
                     case "contextCompaction" -> "Compacting context";
@@ -731,9 +817,9 @@ public final class CodexTopComponent extends TopComponent {
 
         File directory = FileUtil.toFile(project.getProjectDirectory());
 
-        return directory == null
-                ? null
-                : directory.toPath().toAbsolutePath().normalize().toString();
+        if (directory == null) return null;
+        try { return WorkspaceFolders.repositoryRoot(directory.toPath()).toString(); }
+        catch (IOException unavailable) { return directory.toPath().toAbsolutePath().normalize().toString(); }
     }
 
     public void addAttachments(List<DataObject> selectedFiles) {
@@ -748,6 +834,12 @@ public final class CodexTopComponent extends TopComponent {
             File localFile = FileUtil.toFile(file);
 
             if (!file.isData() || localFile == null) {
+                continue;
+            }
+
+            if (ImageAttachment.isImage(localFile.toPath())) {
+                try { chatPanel.addImage(ImageAttachment.fromFile(localFile.toPath())); }
+                catch (IOException | IllegalArgumentException error) { conversationArea.append("Cannot attach image: " + error.getMessage() + "\n"); }
                 continue;
             }
 
@@ -778,7 +870,7 @@ public final class CodexTopComponent extends TopComponent {
     private String buildPromptWithAttachments(
             String prompt,
             List<String> attachments,
-            String directory) throws IOException {
+            List<Path> folders) throws IOException {
 
         if (attachments.isEmpty()) {
             return prompt;
@@ -787,7 +879,6 @@ public final class CodexTopComponent extends TopComponent {
         final int perFileLimit = 64 * 1024;
         final int totalLimit = 256 * 1024;
 
-        Path root = Path.of(directory).toRealPath();
         int totalBytes = 0;
 
         StringBuilder result = new StringBuilder();
@@ -797,12 +888,7 @@ public final class CodexTopComponent extends TopComponent {
 
         for (String attachment : attachments) {
             Path file = Path.of(attachment).toRealPath();
-
-            if (!file.startsWith(root)) {
-                throw new IOException(
-                        "Attachment is outside the conversation project: "
-                        + file);
-            }
+            Path root = WorkspaceFolders.containing(file, folders);
 
             byte[] bytes;
 
@@ -842,7 +928,7 @@ public final class CodexTopComponent extends TopComponent {
             }
 
             result.append("\n--- FILE: ")
-                    .append(root.relativize(file))
+                    .append(file).append(" (project: ").append(root).append(")")
                     .append(" ---\n")
                     .append(content)
                     .append("\n--- END FILE ---\n");
@@ -854,10 +940,6 @@ public final class CodexTopComponent extends TopComponent {
     private void removeAttachmentBtnActionPerformed(
             java.awt.event.ActionEvent evt) {
 
-        int[] indices = attachmentsList.getSelectedIndices();
-
-        for (int i = indices.length - 1; i >= 0; i--) {
-            attachmentModel.remove(indices[i]);
-        }
+        for (String path : attachmentsList.getSelectedValuesList()) attachmentModel.removeElement(path);
     }
 }
