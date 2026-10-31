@@ -72,6 +72,7 @@ public final class CodexTopComponent extends TopComponent {
     private String projectDirectory;
     private boolean turnInProgress;
     private boolean sendAfterSignIn;
+    private boolean historyAfterSignIn;
     private Project lastEditorProject;
     private DataObject lastEditorFile;
     private EditorContext queuedEditorContext;
@@ -120,11 +121,13 @@ public final class CodexTopComponent extends TopComponent {
         checkRuntimeButton.addActionListener(this::checkRuntimeButtonActionPerformed);
         removeAttachmentBtn.addActionListener(this::removeAttachmentBtnActionPerformed);
         chatPanel.attachBtn.addActionListener(event -> chooseAttachments());
+        chatPanel.historyBtn.addActionListener(event -> openHistory());
         chatPanel.newChatBtn.addActionListener(event -> {
             if (turnInProgress) {
                 return;
             }
             threadId = null;
+            historyAfterSignIn = false;
             sendAfterSignIn = false;
             queuedEditorContext = null;
             projectDirectory = null;
@@ -134,6 +137,45 @@ public final class CodexTopComponent extends TopComponent {
             chatPanel.setProjectDirectory(null);
             promptArea.requestFocusInWindow();
         });
+    }
+
+    private void openHistory() {
+        if (turnInProgress) return;
+        if (!chatPanel.isReady()) {
+            if (chatPanel.canSignIn()) {
+                historyAfterSignIn = true;
+                checkRuntimeButton.doClick();
+            }
+            return;
+        }
+        CodexClient client = codexClient;
+        int generation = connectionGeneration;
+        ChatHistoryDialog dialog = new ChatHistoryDialog(SwingUtilities.getWindowAncestor(this),
+                new CodexHistory(client::request),
+                () -> generation == connectionGeneration && client == codexClient,
+                this::restoreConversation);
+        dialog.setVisible(true);
+    }
+
+    private void restoreConversation(CodexHistory.Conversation conversation) {
+        threadId = conversation.id();
+        projectDirectory = conversation.cwd();
+        sendAfterSignIn = false;
+        queuedEditorContext = null;
+        attachmentModel.clear();
+        streamedMessages.clear();
+        activeWork.clear();
+        lastAgentMessageId = null;
+        receivedAgentText = false;
+        conversationArea.setText("");
+        for (CodexHistory.Message message : conversation.messages()) {
+            conversationArea.appendHistoryMessage(message.user(), message.text());
+        }
+        if (conversation.messages().isEmpty()) conversationArea.append("Chat resumed. Send a message to continue.\n");
+        chatPanel.setProjectDirectory(projectDirectory);
+        chatPanel.setConnectionState(CodexChatPanel.ConnectionState.READY);
+        conversationArea.setCaretPosition(conversationArea.getDocument().getLength());
+        promptArea.requestFocusInWindow();
     }
 
     private void chooseAttachments() {
@@ -338,6 +380,7 @@ public final class CodexTopComponent extends TopComponent {
 
                     conversationArea.append("Login failed: " + error + "\n");
                     sendAfterSignIn = false;
+                    historyAfterSignIn = false;
                     queuedEditorContext = null;
                     chatPanel.setConnectionState(CodexChatPanel.ConnectionState.SIGNED_OUT);
                 }
@@ -350,6 +393,7 @@ public final class CodexTopComponent extends TopComponent {
             // Ignore queued notifications and worker results from this connection.
             connectionGeneration++;
             sendAfterSignIn = false;
+            historyAfterSignIn = false;
             queuedEditorContext = null;
             codexClient = null;
             threadId = null;
@@ -418,6 +462,7 @@ public final class CodexTopComponent extends TopComponent {
                     client.close();
                     codexClient = null;
                     sendAfterSignIn = false;
+                    historyAfterSignIn = false;
                     queuedEditorContext = null;
                     chatPanel.setConnectionState(CodexChatPanel.ConnectionState.SIGNED_OUT);
 
@@ -437,6 +482,11 @@ public final class CodexTopComponent extends TopComponent {
             return;
         }
         chatPanel.setConnectionState(CodexChatPanel.ConnectionState.READY);
+        if (historyAfterSignIn) {
+            historyAfterSignIn = false;
+            openHistory();
+            return;
+        }
         if (sendAfterSignIn) {
             // Consume the intent before sending: login can complete through both
             // the account response and a notification, but the turn starts once.
@@ -471,6 +521,7 @@ public final class CodexTopComponent extends TopComponent {
         chatPanel.setActiveFile(null);
         connectionGeneration++;
         sendAfterSignIn = false;
+        historyAfterSignIn = false;
         threadId = null;
         projectDirectory = null;
         chatPanel.setProjectDirectory(null);

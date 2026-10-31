@@ -13,6 +13,7 @@ Review and discuss your code without switching away from your project.
 - **File attachments:** attach saved source files through the composer or the **Add to Codex** context action.
 - **Streaming replies:** see responses as they arrive, with commentary and final messages separated.
 - **Visible activity:** animated status and elapsed time appear below the latest reply while Codex is working.
+- **Shared local history:** browse, search, and resume saved Codex conversations from compatible local clients.
 - **IDE integration:** a dockable panel, light/dark styling, and text wrapping for narrow sidebars.
 
 This version runs in **read-only chat mode**. It can inspect project files but
@@ -98,6 +99,32 @@ attachment button, to include saved UTF-8 source files.
 - Select an attachment and click **×** to remove it.
 - The context action is registered for Java, PHP, and plain-text files.
 
+### Chat history and resuming across local Codex clients
+
+Click the **History** (clock) button beside **New chat**. Sign in if prompted,
+select a saved conversation, and click **Resume chat** or double-click it.
+Search saved titles, refresh for changes made in another client, and use
+**Load older chats** to browse additional pages. Hover over a chat to see its
+project folder and ID.
+
+The plugin uses Codex's shared local session store through `thread/list` and
+`thread/resume`. Chats available in the same Codex home (normally `%USERPROFILE%\.codex`,
+or the inherited `CODEX_HOME`) can be continued with their original thread ID,
+saved messages, and project folder. This includes compatible local desktop,
+CLI, VS Code, and plugin sessions. The project folder must still exist locally.
+Finish a turn before switching clients, then refresh/reopen the chat to load the
+latest saved messages. History is not a live subscription to another client's run.
+
+Resuming keeps the plugin in **read-only** mode, even if the conversation used
+broader permissions elsewhere. User and assistant messages are displayed;
+private reasoning and raw tool payloads are omitted. Existing unsent draft text
+is preserved, and attachments from the previous chat are cleared.
+
+Local history browsing does not add ChatGPT web history, cloud-only chats, or
+browser/mobile sync. A chat held by another Codex client cannot be resumed until
+that client releases it. The desktop app may retain its lock after switching
+conversations; the plugin cannot automatically take ownership from it.
+
 ## Checks
 
 Compile the module with Maven:
@@ -114,7 +141,8 @@ Run the standalone editor-context and progress regression checks:
 
 The script compiles the project and then runs simulated editor and app-server
 scenarios without contacting the Codex service. It covers unsaved buffers,
-project boundaries, message separation, activity, and scrolling. These standalone
+project boundaries, message separation, activity, scrolling, history pagination,
+and resuming saved chats. These standalone
 checks are not automatically executed by `mvn test` alone.
 
 ## Troubleshooting
@@ -132,7 +160,7 @@ checks are not automatically executed by `mvn test` alone.
 
 - The bundled runtime supports Windows x64 only.
 - This package uses NetBeans APIs and cannot be installed in Android Studio or IntelliJ IDEA.
-- File editing, approval dialogs, a skill picker, and chat-history management are not implemented.
+- File editing, approval dialogs, a skill picker, and history deletion/archiving are not implemented.
 - Skills that require unavailable tools or write access cannot complete in the current chat mode.
 
 ## License and third-party components

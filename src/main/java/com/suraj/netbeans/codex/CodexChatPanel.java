@@ -33,6 +33,7 @@ public final class CodexChatPanel extends JPanel {
     final JButton removeAttachmentBtn = iconButton("remove", "Remove selected attachments");
     final JButton attachBtn = iconButton("add", "Attach source files");
     final JButton newChatBtn = iconButton("new", "New chat");
+    final JButton historyBtn = iconButton("history", "Chat history — resume a local Codex chat");
     final JList<String> attachmentsList;
     private final Color background = color("Panel.background", new Color(0x1f1f1f));
     private final boolean dark = background.getRed() + background.getGreen() + background.getBlue() < 384;
@@ -70,7 +71,7 @@ public final class CodexChatPanel extends JPanel {
         if (font == null) font = new Font(Font.SANS_SERIF, Font.PLAIN, 13);
         font = font.deriveFont(13f);
         setFont(font);
-        for (JButton button : new JButton[]{attachBtn, newChatBtn, removeAttachmentBtn}) {
+        for (JButton button : new JButton[]{attachBtn, newChatBtn, historyBtn, removeAttachmentBtn}) {
             button.setForeground(foreground);
         }
 
@@ -88,6 +89,7 @@ public final class CodexChatPanel extends JPanel {
         JLabel version = label("v1", 10, false);
         version.setForeground(muted);
         actions.add(version);
+        actions.add(historyBtn);
         actions.add(newChatBtn);
         header.add(actions, BorderLayout.EAST);
         add(header, BorderLayout.NORTH);
@@ -291,6 +293,7 @@ public final class CodexChatPanel extends JPanel {
         sendBtn.setToolTipText(sendDescription);
         sendBtn.getAccessibleContext().setAccessibleName(sendDescription);
         newChatBtn.setEnabled(signedOut || isReady());
+        historyBtn.setEnabled(signedOut || isReady());
         attachBtn.setEnabled(!working);
     }
 
@@ -437,6 +440,7 @@ public final class CodexChatPanel extends JPanel {
                 case "send" -> { g.drawLine(8, 13, 8, 3); g.drawLine(3, 8, 8, 3); g.drawLine(8, 3, 13, 8); }
                 case "add" -> { g.drawLine(8, 3, 8, 13); g.drawLine(3, 8, 13, 8); }
                 case "remove" -> { g.drawLine(4, 4, 12, 12); g.drawLine(12, 4, 4, 12); }
+                case "history" -> { g.drawArc(2, 2, 12, 12, 45, 290); g.drawLine(1, 2, 1, 6); g.drawLine(1, 6, 5, 6); g.drawLine(8, 4, 8, 8); g.drawLine(8, 8, 11, 10); }
                 default -> { g.drawRoundRect(2, 2, 12, 12, 2, 2); g.drawLine(8, 5, 8, 11); g.drawLine(5, 8, 11, 8); }
             }
             g.dispose();
@@ -507,6 +511,11 @@ public final class CodexChatPanel extends JPanel {
             if (newMessage) insert("\n\n", false, false);
             agent = true;
             insert(text, false, false);
+        }
+        void appendHistoryMessage(boolean user, String text) {
+            agent = !user;
+            insert(user ? "YOU\n" : "CODEX\n", true, true);
+            insert(text + "\n\n", false, false);
         }
         private void insert(String text, boolean bold, boolean muted) {
             SimpleAttributeSet style = new SimpleAttributeSet();

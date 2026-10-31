@@ -15,6 +15,8 @@ try {
     $classpath = (@('target/test-classes', 'target/classes') + $netbeansJars + @($gsonJar)) -join ';'
     & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.ContextAndProgressChecks
     if ($LASTEXITCODE -ne 0) { throw 'Editor-context or progress checks failed.' }
+    & (Join-Path $JavaHome 'bin\java.exe') '-Djava.awt.headless=true' -cp $classpath com.suraj.netbeans.codex.HistoryChecks
+    if ($LASTEXITCODE -ne 0) { throw 'Chat history checks failed.' }
 } finally {
     Pop-Location
 }
